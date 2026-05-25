@@ -1,6 +1,6 @@
 # Null-OS-Public
-Null OS is a bare bones operating system that's a microkernel, a bootloader, and also a terminal at its core
---Heavily recommended to use a Virtual machine for Null OS or else you could potentially brick your computer fully!! I will not be reponsible for broken computers btw.
+Null OS is a bare bones operating system that's a microkernel, a bootloader, and also a terminal at its core.
+Heavily recommended to use a Virtual machine for Null OS or else you could potentially brick your computer!! I will not be held responsible for broken computers btw.
 
 --Here's the general method to get Null OS running: 
 
