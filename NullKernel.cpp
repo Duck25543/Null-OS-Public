@@ -1,6 +1,6 @@
 // Null OS Kernel
 // I really do wonder how many changes I'm going to make to this repository
-
+asm(".code16gcc");
 // --- 1. DEFINITIONS & CONFIGURATION ---
 #define COM1 0x3F8
 #define SLIP_END 0xC0
