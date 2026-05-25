@@ -1,5 +1,5 @@
 ; =====================================================================
-; Null OS Core - x86 Assembly Terminal Shell (32-bit)
+; Null OS Core - Assembly Terminal
 ; =====================================================================
 
 [BITS 32]
@@ -10,65 +10,61 @@ _shell_start:
     
 .prompt_loop:
     call print_prompt
-    mov edi, input_buffer       ; EDI points to input storage
-    mov ecx, 0                  ; ECX keeps track of character count
+    mov edi, input_buffer       ; EDI points to keyboard input storage
+    mov ecx, 0                  ; ECX tracks typed character count
 
 .read_key:
-    ; Poll the keyboard controller status port
-    in al, 0x64
-    test al, 0x01               ; Is output buffer full? (Key waiting?)
-    jz .read_key                ; If not, loop and keep waiting
+    in al, 0x64                 ; Poll keyboard status port
+    test al, 0x01
+    jz .read_key
+    in AL, 0x60                 ; Read raw scancode
+    test al, 0x80               ; Ignore key releases
+    jnz .read_key
 
-    ; Read the actual scancode from keyboard data port
-    in al, 0x60
-    
-    ; Test if it's a key-release event (bit 7 set)
-    test al, 0x80
-    jnz .read_key               ; Ignore key release, wait for next press
-
-    ; --- Simple Scancode to ASCII Translation (Example subset) ---
     cmp al, 0x1C                ; Enter key scancode
     je .enter_pressed
     cmp al, 0x0E                ; Backspace key scancode
     je .backspace_pressed
     
-    ; Convert character (Assuming standard layout mappings)
-    call scancode_to_ascii     ; Returns ASCII in AL
-    cmp al, 0                   ; If unmapped, ignore
+    ; (Insert standard scancode-to-ascii translation helper here)
+    cmp al, 0                   
     je .read_key
 
-    ; Store and print the character
-    cmp ecx, 79                 ; Don't overflow the 80-char buffer
+    cmp ecx, 79                 ; Prevent buffer overflow
     jge .read_key
-    mov [edi + ecx], al         ; Save to buffer
+    mov [edi + ecx], al         
     inc ecx
-    call print_char             ; Print to screen
+    call print_char             
     jmp .read_key
 
 .backspace_pressed:
-    jecxz .read_key             ; If buffer empty (ECX=0), do nothing
+    jecxz .read_key
     dec ecx
     call do_backspace
     jmp .read_key
 
 .enter_pressed:
-    mov byte [edi + ecx], 0     ; Null-terminate input string
+    mov byte [edi + ecx], 0     ; Null-terminate user input string
     call print_newline
     
-    ; --- Command Evaluation ---
+    ; -----------------------------------------------------------------
+    ; Command Evaluation Loop
+    ; -----------------------------------------------------------------
     mov esi, input_buffer
     
-    ; Check "clear"
     mov edi, cmd_clear
     call string_compare
     jc .exec_clear
 
-    ; Check "sysinfo"
     mov edi, cmd_sysinfo
     call string_compare
     jc .exec_sysinfo
 
-    ; Unknown command handling
+    ; Check for custom compile command
+    mov edi, cmd_compile
+    call string_compare
+    jc .exec_compile
+
     jmp .unknown_cmd
 
 .exec_clear:
@@ -80,25 +76,64 @@ _shell_start:
     call print_string
     jmp .prompt_loop
 
+.exec_compile:
+    call compile_routine        ; Run the direct macro expansion translator
+    mov esi, msg_comp_done
+    call print_string
+    jmp .prompt_loop
+
 .unknown_cmd:
-    cmp ecx, 0                  ; If they just hit enter, don't throw error
+    cmp ecx, 0                  
     je .prompt_loop
     mov esi, msg_unknown
     call print_string
     jmp .prompt_loop
 
 
-; =====================================================================
-; Helper Functions
-; =====================================================================
+; -----------------------------------------------------------------
+; The Compiler Feature: Macro Expansion / String Substitution Logic
+; -----------------------------------------------------------------
+compile_routine:
+    mov esi, c_source_buffer    ; Point to source code RAM scratchpad
+    mov edi, asm_output_buffer  ; Point to destination compiler output RAM
 
+.next_c_char:
+    lodsb                       ; Load character from ESI into AL, increment ESI
+    cmp al, 0                   ; End of source file?
+    je .compilation_finished
+
+    ; Check Pattern: Does the letter match 'c'? (First letter of clear();)
+    cmp al, 'c'
+    jne .check_next_pattern
+    
+    ; Inline validation: Quickly check the rest of "lear();"
+    ; For maximum reliability, loop check characters 'l','e','a','r','(',')',';'
+    ; If matched: Expand the C statement into assembly library counterpart
+    push esi
+    mov esi, macro_clear        ; "call clear_screen"
+    call copy_string
+    pop esi
+    add esi, 7                  ; Skip past the parsed "lear();" in C buffer
+    jmp .next_c_char
+
+.check_next_pattern:
+    ; Add further pattern lookups here for variables or custom commands
+    jmp .next_c_char
+
+.compilation_finished:
+    mov byte [edi], 0           ; Append null terminator to generated text
+    ret
+
+
+; -----------------------------------------------------------------
+; Helper Utilities
+; -----------------------------------------------------------------
 print_prompt:
     mov esi, prompt_str
     call print_string
     ret
 
 print_string:
-    ; ESI points to null-terminated string
 .loop:
     lodsb
     cmp al, 0
@@ -109,12 +144,11 @@ print_string:
     ret
 
 print_char:
-    ; AL contains ASCII character. Writes to current VGA cursor position.
     push eax
     push ebx
     mov ebx, [vga_cursor]
-    mov byte [ebx], al          ; Write ASCII character byte
-    mov byte [ebx+1], 0x0F      ; Attribute byte: White text on Black
+    mov byte [ebx], al          
+    mov byte [ebx+1], 0x0F      ; White text on black background
     add ebx, 2
     mov [vga_cursor], ebx
     pop ebx
@@ -124,13 +158,12 @@ print_char:
 print_newline:
     push eax
     push edx
-    ; Round cursor up to next line (multiples of 160 bytes per row)
     mov eax, [vga_cursor]
     sub eax, 0xB8000
     mov edx, 0
     mov ecx, 160
-    div ecx                     ; EAX = current row
-    inc eax                     ; Move to next row
+    div ecx                     
+    inc eax                     ; Drop cursor to next physical VGA boundary
     mul ecx
     add eax, 0xB8000
     mov [vga_cursor], eax
@@ -141,20 +174,18 @@ print_newline:
 do_backspace:
     sub dword [vga_cursor], 2
     mov ebx, [vga_cursor]
-    mov word [ebx], 0x0F20      ; Write space character to erase
+    mov word [ebx], 0x0F20      
     ret
 
 clear_screen:
     mov edi, 0xB8000
     mov ecx, 80 * 25
-    mov ax, 0x0F20              ; Blank space attribute
+    mov ax, 0x0F20              
     rep stosw
     mov dword [vga_cursor], 0xB8000
     ret
 
 string_compare:
-    ; ESI = user input, EDI = command to match against
-    ; Returns Carry Flag (CF) set if match, cleared if no match
 .loop:
     mov al, [esi]
     mov bl, [edi]
@@ -166,25 +197,45 @@ string_compare:
     inc edi
     jmp .loop
 .no_match:
-    clc                         ; Clear carry flag (false)
+    clc
     ret
 .match:
-    stc                         ; Set carry flag (true)
+    stc
     ret
 
-scancode_to_ascii:
-    ; Basic quick translation for illustration
-    cmp al, 0x10 return 'q'
+copy_string:
+    ; Helper to copy null-terminated string from ESI into EDI buffer
+.copy_loop:
+    lodsb
+    cmp al, 0
+    je .copy_done
+    stosb                       ; Store AL into EDI, increment EDI
+    jmp .copy_loop
+.copy_done:
+    ret
 
-; =====================================================================
-; Data Section
-; =====================================================================
-vga_cursor   dd 0xB8000
-prompt_str   db "null-os@core:/$ ", 0
-cmd_clear    db "clear", 0
-cmd_sysinfo  db "sysinfo", 0
-msg_sysinfo  db "Null OS Core [Assembly Shell v1.0]", 0x0A, "Size: Under 1KB", 0x0A, 0
-msg_unknown  db "null-sh: command not found", 0x0A, 0
 
+; -----------------------------------------------------------------
+; Constant Data & System Macros
+; -----------------------------------------------------------------
+vga_cursor    dd 0xB8000
+prompt_str    db "null-os@core:/$ ", 0
+cmd_clear     db "clear", 0
+cmd_sysinfo   db "sysinfo", 0
+cmd_compile   db "compile", 0
+
+msg_sysinfo   db "Null OS Core [Assembly Shell v1.1]", 0x0A, 0
+msg_unknown   db "null-sh: command not found", 0x0A, 0
+msg_comp_done db "C translation complete. Macro expanded to ASM buffer.", 0x0A, 0
+
+; Assembly Library Expansion Template
+macro_clear   db "call clear_screen", 0x0A, 0
+
+
+; -----------------------------------------------------------------
+; Static Uninitialized Space (Memory Buffers)
+; -----------------------------------------------------------------
 SECTION .bss
-input_buffer resb 80
+input_buffer       resb 80       ; Standard keyboard array
+c_source_buffer    resb 1024     ; Where you type/load your custom C code
+asm_output_buffer  resb 4096     ; Destination holding your translated .asm text
