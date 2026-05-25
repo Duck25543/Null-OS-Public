@@ -50,8 +50,10 @@ continue_print:
     div bl
     mov bh, ah
     pop ax
+    
     cmp bh, 0
-    jne check_done
+    je print_space      ; Jump explicitly to print space if remainder is 0
+    jmp check_done      ; Otherwise, skip printing a space safely
 
 print_space:
     mov al, ' '
@@ -87,6 +89,8 @@ trigger_kernel_boot:
     call print_string
     
     ; 1. Load the kernel from disk to RAM
+    xor ax, ax             ; Safe segment normalization
+    mov es, ax
     mov bx, KERNEL_OFFSET  ; Destination pointer
     mov dh, 15             
     mov dl, [BOOT_DRIVE]   ; Use saved boot disk index
@@ -138,11 +142,13 @@ print_string:
 ; ==========================================================
 gdt_start:
 gdt_null: 
-    dd 0x0 | dd 0x0
+    dd 0x0, 0x0
 gdt_code: 
-    dw 0xffff | dw 0x0 | db 0x0 | db 10011010b | db 11001111b | db 0x0
+    dw 0xffff, 0x0
+    db 0x0, 10011010b, 11001111b, 0x0
 gdt_data: 
-    dw 0xffff | dw 0x0 | db 0x0 | db 10010012b | db 11001111b | db 0x0
+    dw 0xffff, 0x0
+    db 0x0, 10010012b, 11001111b, 0x0
 gdt_end:
 
 gdt_descriptor:
