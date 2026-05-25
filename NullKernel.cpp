@@ -1,4 +1,4 @@
-//added SLIP
+//fixed keyboard issue, now is mostly complete, if i didn't want to keep working on this
 // --- 1. DEFINITIONS ---
 #define COM1 0x3F8
 #define SLIP_END 0xC0
@@ -10,7 +10,7 @@
 
 void bare_metal_print(const char* message) {
     unsigned short* vga_buffer = (unsigned short *)0xB8000;
-    static int line_offset = 0; 
+    static int line_offset = 0;
     for (int i = 0; message[i] != '\0'; i++) {
         vga_buffer[line_offset + i] = (0x0F << 8) | message[i];
     }
@@ -59,7 +59,7 @@ char scancode_to_ascii(unsigned char scancode) {
     if (scancode == 0x07) return '6'; if (scancode == 0x08) return '7';
     if (scancode == 0x09) return '8'; if (scancode == 0x0A) return '9';
     if (scancode == 0x0B) return '0'; if (scancode == 0x0D) return '=';
-    if (scancode == 0x4E) return '+'; 
+    if (scancode == 0x4E) return '+';
     return 0;
 }
 
@@ -107,23 +107,35 @@ void slip_install_package() {
 extern "C" void _start() {
     init_serial();
     bare_metal_print("NULL OS 0.2: JIT + SLIP ACTIVE");
-    
+
     char buf[64]; int idx = 0; unsigned char last = 0;
-    
+
     while (true) {
         unsigned char k = read_keyboard_port();
-        if (k != last && k != 0) {
+
+        if (k & 0x80) {
+            last = 0;
+        }
+        else if (k != last && k != 0) {
             last = k;
-            if (k == 0x1C) { // ENTER
+
+            if (k == 0x1C) { // ENTER KEY
                 buf[idx] = '\0';
-                if (buf[0]=='s' && buf[1]=='l' && buf[2]=='i' && buf[3]=='p') slip_install_package();
-                else compile_and_run_script(buf);
+                if (buf[0]=='s' && buf[1]=='l' && buf[2]=='i' && buf[3]=='p') {
+                    slip_install_package();
+                } else {
+                    compile_and_run_script(buf);
+                }
                 idx = 0;
             } else {
                 char a = scancode_to_ascii(k);
-                if (a && idx < 63) buf[idx++] = a;
+                if (a && idx < 63) {
+                    buf[idx++] = a;
+                }
             }
         }
+
         if (k == 0) last = 0;
     }
 }
+
